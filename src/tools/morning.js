@@ -5,14 +5,12 @@ import * as core from "../core/morning.js";
 export function registerMorningTools(server) {
   server.tool(
     "morning_brief",
-    "Scan your watchlist, read all indicator values, and return structured data for a session brief. Reads rules.json for your bias criteria and watchlist. Claude applies the rules to generate your daily bias.",
+    "Full premarket brief: pre-screens TradingView watchlist + Yahoo screeners for movers, then runs EDGE scoring (reads ALL indicators: breakout channels, BOS/CHoCH labels, order blocks, FVG zones, BSL/SSL levels) on your core watchlist + top movers. Returns regime gate + chart-first scored setups. This is your primary morning tool.",
     {
       rules_path: z
         .string()
         .optional()
-        .describe(
-          "Optional path to rules.json. Defaults to rules.json in the project root.",
-        ),
+        .describe("Optional path to rules.json. Defaults to rules.json in the project root."),
     },
     async ({ rules_path } = {}) => {
       try {
@@ -24,15 +22,49 @@ export function registerMorningTools(server) {
   );
 
   server.tool(
+    "edge",
+    "Hunt asymmetric setups using CHART-FIRST scoring. Reads ALL TradingView indicators on each symbol: (1) Regime gate via Breakout Channels on SPY/QQQ, (2) Deep scan: study values + Pine labels (BOS/CHoCH) + Pine lines (OB levels, BSL/SSL) + Pine boxes (FVG zones), (3) Score 6 signal categories — 3+ required, (4) Options confirmation on qualified setups only. Returns scored play cards. Zero plays if nothing qualifies — never forces a trade.",
+    {
+      symbols: z
+        .array(z.string())
+        .optional()
+        .describe("Symbols to scan. Defaults to rules.json watchlist."),
+      bankroll: z
+        .number()
+        .optional()
+        .describe("Bankroll size for position sizing. Default $25,000."),
+      skip_regime: z
+        .boolean()
+        .optional()
+        .describe("Skip SPY/QQQ regime gate (use if you already know regime). Default false."),
+      skip_options: z
+        .boolean()
+        .optional()
+        .describe("Skip options analysis on qualified setups. Default false."),
+      rules_path: z
+        .string()
+        .optional()
+        .describe("Optional path to rules.json."),
+    },
+    async ({ symbols, bankroll, skip_regime, skip_options, rules_path } = {}) => {
+      try {
+        return jsonResult(
+          await core.runEdge({ rules_path, symbols, skip_regime, skip_options, bankroll }),
+        );
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    },
+  );
+
+  server.tool(
     "midday_scan",
-    "Mid-day screener: scans all 100+ tickers in watchlist_full for intraday movers — biggest % moves from open, volume spikes (2x+ avg), and reversal setups (near LOD/HOD). Auto-scans top movers on TradingView with SMC indicators. Use anytime during market hours to find new setups.",
+    "Mid-day screener: scans TradingView watchlist for intraday movers (2%+ change), then runs EDGE scoring on top movers with full indicator reads. Use anytime during market hours to find new setups.",
     {
       rules_path: z
         .string()
         .optional()
-        .describe(
-          "Optional path to rules.json. Defaults to rules.json in the project root.",
-        ),
+        .describe("Optional path to rules.json. Defaults to rules.json in the project root."),
     },
     async ({ rules_path } = {}) => {
       try {
@@ -49,9 +81,7 @@ export function registerMorningTools(server) {
     {
       brief: z
         .string()
-        .describe(
-          "The brief text to save (output from morning_brief after Claude applies the rules).",
-        ),
+        .describe("The brief text to save (output from morning_brief after Claude applies the rules)."),
       date: z
         .string()
         .optional()

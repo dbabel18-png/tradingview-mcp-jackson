@@ -2,10 +2,13 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+let heartbeatTimer = null;
+let lastKnownGood = {}; // cache of last successful values per key
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
+const HEARTBEAT_INTERVAL = 30000; // 30s
 
 // Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
 const KNOWN_PATHS = {
@@ -105,7 +108,92 @@ export async function evaluateAsync(expression) {
   return evaluate(expression, { awaitPromise: true });
 }
 
+/**
+ * Evaluate with automatic retry + reconnect on failure.
+ * Wraps evaluate() with exponential backoff. If the CDP socket is dead,
+ * it forces a reconnect before retrying.
+ *
+ * @param {string} expression - JS expression to evaluate
+ * @param {object} [opts] - options passed to evaluate()
+ * @param {number} [retries=5] - max retry attempts
+ * @param {number} [delay=1000] - initial backoff delay in ms
+ * @param {string} [cacheKey] - if set, caches successful results and returns
+ *                               last-known-good on total failure (stale > dead)
+ */
+export async function evaluateWithRetry(expression, opts = {}, retries = 5, delay = 1000, cacheKey = null) {
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const result = await evaluate(expression, opts);
+      // Cache successful result if a key was provided
+      if (cacheKey && result != null) {
+        lastKnownGood[cacheKey] = { value: result, time: Date.now() };
+      }
+      return result;
+    } catch (err) {
+      lastErr = err;
+      // Force reconnect on connection-related errors
+      if (/disconnected|WebSocket|ECONNREFUSED|Protocol error|target closed/i.test(err.message)) {
+        client = null;
+        targetInfo = null;
+        try { await connect(); } catch (_) {}
+      }
+      if (i < retries - 1) {
+        await new Promise(r => setTimeout(r, delay * Math.pow(2, i)));
+      }
+    }
+  }
+  // If we have a cached value, return it stale rather than crashing
+  if (cacheKey && lastKnownGood[cacheKey]) {
+    const cached = lastKnownGood[cacheKey];
+    cached.stale = true;
+    cached.staleSince = Date.now() - cached.time;
+    process.stderr.write(`[connection] Returning stale cache for "${cacheKey}" (age ${Math.round(cached.staleSince / 1000)}s)\n`);
+    return cached.value;
+  }
+  throw lastErr;
+}
+
+/**
+ * Start a heartbeat that pings TradingView every HEARTBEAT_INTERVAL ms.
+ * If the ping fails, it forces a reconnect so the next real call doesn't
+ * eat the full retry delay.
+ */
+export function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(async () => {
+    try {
+      await evaluate('1');
+    } catch {
+      process.stderr.write('[heartbeat] Connection lost — attempting reconnect...\n');
+      client = null;
+      targetInfo = null;
+      try {
+        await connect();
+        process.stderr.write('[heartbeat] Reconnected successfully.\n');
+      } catch (err) {
+        process.stderr.write(`[heartbeat] Reconnect failed: ${err.message}\n`);
+      }
+    }
+  }, HEARTBEAT_INTERVAL);
+  // Don't let the heartbeat keep the process alive
+  if (heartbeatTimer.unref) heartbeatTimer.unref();
+}
+
+export function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+/** Read from the last-known-good cache. Returns undefined if no cache. */
+export function getCachedValue(key) {
+  return lastKnownGood[key]?.value;
+}
+
 export async function disconnect() {
+  stopHeartbeat();
   if (client) {
     try { await client.close(); } catch {}
     client = null;
