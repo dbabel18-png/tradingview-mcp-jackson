@@ -1013,6 +1013,121 @@ export async function runEdge({ rules_path, symbols, skip_regime, skip_options, 
     }
   }
 
+  // --- STEP 2a: 1m QUICK SCAN for Strong/Weak Low/High labels on qualified setups ---
+  // The 5m chart doesn't show Strong/Weak labels — only the 1m does.
+  // This scan reads ONLY pine labels on 1m, then merges into the 5m signals.
+  if (scoredSetups.length > 0) {
+    try {
+      await chart.setTimeframe({ timeframe: "1" });
+      await new Promise((r) => setTimeout(r, 400));
+
+      for (const setup of scoredSetups) {
+        try {
+          await chart.setSymbol({ symbol: setup.symbol });
+          await new Promise((r) => setTimeout(r, 1500));
+
+          // Only read labels on 1m — we just need Strong/Weak/EQH/EQL
+          const labels1m = await data.getPineLabels({ max_labels: 80, verbose: true });
+          const smcLabels1m = findLabelStudy(labels1m, INDICATOR_PATTERNS.smcLuxalgo);
+
+          if (smcLabels1m && smcLabels1m.labels) {
+            if (!setup.signals.liquidity_labels) {
+              setup.signals.liquidity_labels = { strong_lows: [], weak_lows: [], strong_highs: [], weak_highs: [], eqh: [], eql: [] };
+            }
+            for (const lbl of smcLabels1m.labels) {
+              const text = (lbl.text || "").toLowerCase().trim();
+              const p = lbl.price;
+              if (!p || p <= 0) continue;
+              if (/strong\s*low|strong_low/i.test(text)) setup.signals.liquidity_labels.strong_lows.push(p);
+              else if (/weak\s*low|weak_low/i.test(text)) setup.signals.liquidity_labels.weak_lows.push(p);
+              else if (/strong\s*high|strong_high/i.test(text)) setup.signals.liquidity_labels.strong_highs.push(p);
+              else if (/weak\s*high|weak_high/i.test(text)) setup.signals.liquidity_labels.weak_highs.push(p);
+              else if (/^eqh$/i.test(text)) setup.signals.liquidity_labels.eqh.push(p);
+              else if (/^eql$/i.test(text)) setup.signals.liquidity_labels.eql.push(p);
+            }
+
+            // Also read 1m structure shift to check if 1m agrees with trade direction
+            const BULLISH_COLOR_1m = 4282726130;
+            const BEARISH_COLOR_1m = 4286683400;
+            let last1mChoch = null;
+            for (const lbl of smcLabels1m.labels) {
+              const text = (lbl.text || "").toUpperCase();
+              if (/CHOCH|CHoCH/.test(text)) {
+                let dir = null;
+                if (lbl.textColor === BULLISH_COLOR_1m) dir = "bullish";
+                else if (lbl.textColor === BEARISH_COLOR_1m) dir = "bearish";
+                if (dir) last1mChoch = dir;
+              }
+            }
+
+            if (last1mChoch) {
+              setup.tf_1m_structure = last1mChoch;
+              const tradeDir = setup.scoring.direction;
+              const agrees1m = (tradeDir === "CALLS" && last1mChoch === "bullish") ||
+                               (tradeDir === "PUTS" && last1mChoch === "bearish");
+              if (!agrees1m) {
+                if (!setup.scoring.anti_patterns) setup.scoring.anti_patterns = [];
+                setup.scoring.anti_patterns.push(
+                  `WARNING: 1m structure is ${last1mChoch} but trade is ${tradeDir} — lowest timeframe disagrees`
+                );
+              }
+            }
+
+            // Re-run Strong/Weak anti-pattern checks now that we have 1m labels
+            const price = setup.quote?.last || 0;
+            const liq = setup.signals.liquidity_labels;
+            const nearestStrongLow = (liq.strong_lows || []).filter(p => p < price).sort((a, b) => b - a)[0];
+            const nearestWeakLow = (liq.weak_lows || []).filter(p => p < price).sort((a, b) => b - a)[0];
+            const nearestStrongHigh = (liq.strong_highs || []).filter(p => p > price).sort((a, b) => a - b)[0];
+            const nearestWeakHigh = (liq.weak_highs || []).filter(p => p > price).sort((a, b) => a - b)[0];
+
+            if (!setup.scoring.anti_patterns) setup.scoring.anti_patterns = [];
+
+            if (setup.scoring.direction === "PUTS" && nearestStrongLow && !nearestWeakLow) {
+              setup.scoring.anti_patterns.push(
+                `BLOCKED: 1m Strong Low at $${nearestStrongLow.toFixed(2)} — no Weak Low below, puts have no target`
+              );
+              setup.scoring.direction = null;
+              setup.scoring.conviction = 0;
+              setup.scoring.qualified = false;
+            } else if (setup.scoring.direction === "PUTS" && nearestWeakLow) {
+              setup.scoring.anti_patterns.push(
+                `CONFIRMED: 1m Weak Low at $${nearestWeakLow.toFixed(2)} — bearish target, market expects sweep`
+              );
+            }
+
+            if (setup.scoring.direction === "CALLS" && nearestStrongHigh && !nearestWeakHigh) {
+              setup.scoring.anti_patterns.push(
+                `BLOCKED: 1m Strong High at $${nearestStrongHigh.toFixed(2)} — no Weak High above, calls have no target`
+              );
+              setup.scoring.direction = null;
+              setup.scoring.conviction = 0;
+              setup.scoring.qualified = false;
+            } else if (setup.scoring.direction === "CALLS" && nearestWeakHigh) {
+              setup.scoring.anti_patterns.push(
+                `CONFIRMED: 1m Weak High at $${nearestWeakHigh.toFixed(2)} — bullish target, market expects takeout`
+              );
+            }
+
+            // Clean up empty anti_patterns
+            if (setup.scoring.anti_patterns.length === 0) setup.scoring.anti_patterns = null;
+          }
+        } catch (err) {
+          // 1m scan failed for this symbol — continue without it
+          process.stderr.write(`[edge] 1m scan failed for ${setup.symbol}: ${err.message}\n`);
+        }
+      }
+
+      // Switch back to primary timeframe
+      try {
+        await chart.setTimeframe({ timeframe: default_timeframe });
+        await new Promise((r) => setTimeout(r, 300));
+      } catch (_) {}
+    } catch (err) {
+      process.stderr.write(`[edge] 1m scan pass failed: ${err.message}\n`);
+    }
+  }
+
   // --- STEP 2b: HTF PASS — read 15m for bigger targets/walls on qualified setups ---
   const htfTimeframe = rules.confirmation_timeframe || rules.trader_profile?.confirmation_timeframe || "15";
   if (scoredSetups.length > 0) {

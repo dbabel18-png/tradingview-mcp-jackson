@@ -1,6 +1,17 @@
 import { z } from "zod";
 import { jsonResult } from "./_format.js";
-import * as core from "../core/morning.js";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CORE_PATH = resolve(__dirname, "../core/morning.js");
+
+// Dynamic import with cache busting — ensures code edits take effect without server restart
+async function loadCore() {
+  const cacheBust = `?t=${Date.now()}`;
+  const mod = await import(`file://${CORE_PATH}${cacheBust}`);
+  return mod;
+}
 
 export function registerMorningTools(server) {
   server.tool(
@@ -14,6 +25,7 @@ export function registerMorningTools(server) {
     },
     async ({ rules_path } = {}) => {
       try {
+        const core = await loadCore();
         return jsonResult(await core.runBrief({ rules_path }));
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
@@ -48,6 +60,7 @@ export function registerMorningTools(server) {
     },
     async ({ symbols, bankroll, skip_regime, skip_options, rules_path } = {}) => {
       try {
+        const core = await loadCore();
         return jsonResult(
           await core.runEdge({ rules_path, symbols, skip_regime, skip_options, bankroll }),
         );
@@ -68,6 +81,7 @@ export function registerMorningTools(server) {
     },
     async ({ rules_path } = {}) => {
       try {
+        const core = await loadCore();
         return jsonResult(await core.runMidDayScan({ rules_path }));
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
@@ -89,6 +103,7 @@ export function registerMorningTools(server) {
     },
     async ({ brief, date } = {}) => {
       try {
+        const core = await loadCore();
         return jsonResult(core.saveSession({ brief, date }));
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
@@ -107,6 +122,7 @@ export function registerMorningTools(server) {
     },
     async ({ date } = {}) => {
       try {
+        const core = await loadCore();
         return jsonResult(core.getSession({ date }));
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
