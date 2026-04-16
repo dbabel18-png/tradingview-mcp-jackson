@@ -24,6 +24,26 @@ export function registerMorningTools(server) {
   );
 
   server.tool(
+    "midday_scan",
+    "Mid-day screener: scans all 100+ tickers in watchlist_full for intraday movers — biggest % moves from open, volume spikes (2x+ avg), and reversal setups (near LOD/HOD). Auto-scans top movers on TradingView with SMC indicators. Use anytime during market hours to find new setups.",
+    {
+      rules_path: z
+        .string()
+        .optional()
+        .describe(
+          "Optional path to rules.json. Defaults to rules.json in the project root.",
+        ),
+    },
+    async ({ rules_path } = {}) => {
+      try {
+        return jsonResult(await core.runMidDayScan({ rules_path }));
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    },
+  );
+
+  server.tool(
     "session_save",
     "Save today's morning brief to ~/.tradingview-mcp/sessions/YYYY-MM-DD.json for future reference.",
     {

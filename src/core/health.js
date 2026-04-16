@@ -170,10 +170,10 @@ export async function launch({ port, kill_existing } = {}) {
       `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
     ],
     win32: [
-      `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
-      `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
-      `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
-    ],
+      process.env.LOCALAPPDATA && `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
+      process.env.PROGRAMFILES && `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
+      process.env['PROGRAMFILES(X86)'] && `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+    ].filter(Boolean),
     linux: [
       '/opt/TradingView/tradingview',
       '/opt/TradingView/TradingView',
@@ -187,6 +187,20 @@ export async function launch({ port, kill_existing } = {}) {
   const candidates = pathMap[platform] || pathMap.linux;
   for (const p of candidates) {
     if (p && existsSync(p)) { tvPath = p; break; }
+  }
+
+  // Windows Store / UWP install — query AppX package registry directly
+  // so version bumps don't break the path. This is where most Windows
+  // users actually have TradingView installed.
+  if (!tvPath && platform === 'win32') {
+    try {
+      const ps = `powershell.exe -NoProfile -Command "(Get-AppxPackage -Name 'TradingView*' | Select-Object -First 1).InstallLocation"`;
+      const installDir = execSync(ps, { timeout: 5000 }).toString().trim();
+      if (installDir) {
+        const candidate = `${installDir}\\TradingView.exe`;
+        if (existsSync(candidate)) tvPath = candidate;
+      }
+    } catch { /* no Store install or PowerShell blocked */ }
   }
 
   if (!tvPath) {
@@ -219,8 +233,29 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  // On Windows, route launch through PowerShell Start-Process. Raw spawn()
+  // can hit access-denied on Store (WindowsApps) binaries because they need
+  // the Windows package activation layer; Start-Process handles that cleanly.
+  // Use execSync (not spawn+detach) because Start-Process returns immediately
+  // after launching the child, so blocking briefly is cheap — and it avoids a
+  // Windows race where detached PowerShell children get torn down before
+  // Start-Process actually fires.
+  let pid = null;
+  if (platform === 'win32') {
+    const escaped = tvPath.replace(/'/g, "''");
+    try {
+      execSync(
+        `powershell.exe -NoProfile -Command "Start-Process -FilePath '${escaped}' -ArgumentList '--remote-debugging-port=${cdpPort}'"`,
+        { timeout: 8000, stdio: 'ignore' }
+      );
+    } catch (err) {
+      throw new Error(`Failed to launch TradingView via Start-Process: ${err.message}`);
+    }
+  } else {
+    const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+    pid = child.pid;
+  }
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
@@ -236,7 +271,7 @@ export async function launch({ port, kill_existing } = {}) {
       if (ready) {
         const info = JSON.parse(ready);
         return {
-          success: true, platform, binary: tvPath, pid: child.pid,
+          success: true, platform, binary: tvPath, pid,
           cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
           browser: info.Browser, user_agent: info['User-Agent'],
         };
@@ -245,7 +280,7 @@ export async function launch({ port, kill_existing } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, pid, cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }

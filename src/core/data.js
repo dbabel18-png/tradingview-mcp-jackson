@@ -2,6 +2,7 @@
  * Core data access logic.
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS } from '../connection.js';
+import { setSymbol as chartSetSymbol } from './chart.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -242,12 +243,15 @@ export async function getEquity() {
   return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
 }
 
-export async function getQuote({ symbol } = {}) {
-  const data = await evaluate(`
+// Reads the quote from whatever symbol the chart is currently on.
+// The `symbol` param is a label only — callers must switch the chart first
+// if they want a different symbol's bars. getQuote() handles that wrapping.
+async function readCurrentChartQuote() {
+  return await evaluate(`
     (function() {
       var api = ${CHART_API};
-      var sym = '${symbol || ''}';
-      if (!sym) { try { sym = api.symbol(); } catch(e) {} }
+      var sym = '';
+      try { sym = api.symbol(); } catch(e) {}
       if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
       var ext = {};
       try { ext = api.symbolExt() || {}; } catch(e) {}
@@ -273,6 +277,42 @@ export async function getQuote({ symbol } = {}) {
       return quote;
     })()
   `);
+}
+
+// Strip exchange prefix (NASDAQ:TSLA -> TSLA) for fuzzy matching
+function stripExchange(s) {
+  if (!s) return '';
+  const idx = s.indexOf(':');
+  return (idx >= 0 ? s.slice(idx + 1) : s).toUpperCase();
+}
+
+export async function getQuote({ symbol } = {}) {
+  // Read current chart symbol first so we know if we need to switch
+  let currentSymbol = '';
+  try {
+    const state = await evaluate(`(function(){ try { return ${CHART_API}.symbol(); } catch(e) { return ''; } })()`);
+    if (typeof state === 'string') currentSymbol = state;
+  } catch (_) {}
+
+  const requested = (symbol || '').trim();
+  const needSwitch = requested && stripExchange(requested) !== stripExchange(currentSymbol);
+
+  let data;
+  if (needSwitch) {
+    // Switch chart, read, restore. Always restore in finally so one bad pull
+    // doesn't leave the user's chart stuck on the wrong symbol.
+    try {
+      await chartSetSymbol({ symbol: requested });
+      data = await readCurrentChartQuote();
+    } finally {
+      if (currentSymbol) {
+        try { await chartSetSymbol({ symbol: currentSymbol }); } catch (_) {}
+      }
+    }
+  } else {
+    data = await readCurrentChartQuote();
+  }
+
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
   return { success: true, ...data };
 }
