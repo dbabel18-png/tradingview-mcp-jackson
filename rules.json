@@ -381,6 +381,31 @@
         "Max pain + liquidity pool + order block = highest conviction entry",
         "Never trade against max pain in last 2 hours of expiry day"
       ]
+    },
+    "zero_dte_pinning": {
+      "definition": "0DTE max pain creates a short-term gravitational force that pulls spot price toward the pin strike in the last 1-2 hours of the trading day. This effect impacts ALL longer-dated positions on the same underlying — they get whipsawed by the pin.",
+      "why_it_matters": "If you hold a 5/8 put and 0DTE max pain is ABOVE current spot, the underlying will drift UP into close, blowing through your stop or eroding your option value. Even though your position has 5+ days left, the 0DTE pin moves spot today.",
+      "rules": [
+        "ALWAYS check today's 0DTE max pain even when holding longer-dated positions",
+        "If 0DTE max pain is in the OPPOSITE direction of your trade thesis: tighten stops or trim before 2 PM",
+        "After 2 PM, 0DTE pinning gravity is strongest — assume price drifts toward pin into close",
+        "If 0DTE max pain agrees with your direction: hold into close, pin helps",
+        "If 0DTE max pain disagrees: exit half before 2 PM, hold runner only if structure still confirms"
+      ],
+      "calculation": "Pull options_analysis on underlying, get expiries[0].max_pain.maxPain. Compare to spot. Distance + time-of-day determines pin pressure.",
+      "example": "User holds 6x NVDA 5/8 $195P. Spot $200. NVDA 0DTE (5/1) max pain = $197.50. PIN AGREES with bearish thesis — hold. If 0DTE max pain were $202.50, the pin would drag spot UP today, hurting the longer-dated puts. Action: exit half before 2 PM."
+    },
+    "market_trend_alignment": {
+      "definition": "Macro regime check — even if individual ticker setup is clean, fighting the broader market regime requires sweep + CHoCH override.",
+      "rules": [
+        "BEFORE entering ANY directional trade, check SPY and QQQ via regime gate",
+        "If regime is BULLISH (SPY+QQQ both bullish breakout) and you take PUTS: REQUIRE both liquidity_sweep AND CHoCH on the individual name — both confirmed",
+        "If regime is BEARISH and you take CALLS: same requirement",
+        "If regime is NEUTRAL: setup must be ★★★ or higher to qualify",
+        "If individual ticker setup says PUTS but ALL of (SPY, QQQ, ticker) show bullish breakout signals AND no liquidity sweep on ticker: BLOCKED — this is the configured anti-pattern"
+      ],
+      "trade_against_trend_warning": "Going against the macro trend is statistically the lowest-win-rate play in our backtest. Even with confirmation, expect 30-40% win rate vs 55-65% for trend-aligned plays. Size DOWN by 50% when fighting trend.",
+      "the_5_1_2026_lesson": "User entered NVDA 5/8 $195P during a bullish day (SPY +0.6%, QQQ +0.9%, VIX 16.7 calm). 5m+1m showed bearish CHoCH but 15m had no signal and macro was risk-on. The trade was against trend. System should have flagged this as a TREND_FIGHT setup and capped conviction at 2."
     }
   },
 

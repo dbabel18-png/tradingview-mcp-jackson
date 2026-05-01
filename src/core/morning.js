@@ -1658,12 +1658,116 @@ function buildPlayCard(setup, regime, optionsData, bankroll, rules) {
     else suggestedDte = `${nearest?.dte}DTE`;
   }
 
+  // === 0DTE PINNING CHECK ===
+  // Even on longer-dated positions, today's 0DTE max pain pulls spot toward it
+  // in last 1-2 hours of trading. If pin disagrees with trade direction, warn.
+  let pinningWarning = null;
+  if (optionsData?.expiries?.[0]?.dte === 0 && optionsData?.expiries?.[0]?.max_pain?.maxPain) {
+    const pin = optionsData.expiries[0].max_pain.maxPain;
+    const pinDistancePct = ((pin - price) / price) * 100;
+    const pinAbove = pin > price;
+    const pinBelow = pin < price;
+
+    if (direction === "PUTS" && pinAbove && Math.abs(pinDistancePct) > 0.3) {
+      pinningWarning = {
+        status: "PIN_DISAGREES",
+        max_pain: pin,
+        distance_pct: pinDistancePct.toFixed(2),
+        message: `⚠️ 0DTE pin at $${pin} is ABOVE spot $${price.toFixed(2)} — pin drags spot UP today, fights PUTS thesis. Trim half before 2 PM.`
+      };
+    } else if (direction === "CALLS" && pinBelow && Math.abs(pinDistancePct) > 0.3) {
+      pinningWarning = {
+        status: "PIN_DISAGREES",
+        max_pain: pin,
+        distance_pct: pinDistancePct.toFixed(2),
+        message: `⚠️ 0DTE pin at $${pin} is BELOW spot $${price.toFixed(2)} — pin drags spot DOWN today, fights CALLS thesis. Trim half before 2 PM.`
+      };
+    } else if (
+      (direction === "PUTS" && pinBelow) ||
+      (direction === "CALLS" && pinAbove)
+    ) {
+      pinningWarning = {
+        status: "PIN_AGREES",
+        max_pain: pin,
+        distance_pct: pinDistancePct.toFixed(2),
+        message: `✓ 0DTE pin at $${pin} agrees with ${direction} thesis — hold into close, pin helps.`
+      };
+    }
+  }
+
+  // === MARKET TREND ALIGNMENT CHECK ===
+  // Fighting macro regime = lower win rate, force smaller size
+  let trendAlignment = null;
+  const isAgainstTrend = (
+    (direction === "PUTS" && (regime === "bullish" || regime === "lean_bullish")) ||
+    (direction === "CALLS" && (regime === "bearish" || regime === "lean_bearish"))
+  );
+  if (isAgainstTrend) {
+    trendAlignment = {
+      status: "FIGHTING_TREND",
+      regime,
+      message: `⚠️ Trade ${direction} against ${regime} macro regime. Backtest win rate drops 30-40% vs aligned. Size reduced 50%.`
+    };
+    maxPremium = Math.floor(maxPremium / 2);
+  } else if (regime === "neutral") {
+    trendAlignment = {
+      status: "NEUTRAL_REGIME",
+      regime,
+      message: `— Neutral regime, no tailwind. Conviction must be ★★★ or higher.`
+    };
+  } else {
+    trendAlignment = {
+      status: "TREND_ALIGNED",
+      regime,
+      message: `✓ Trade ${direction} aligned with ${regime} macro regime — tailwind helps.`
+    };
+  }
+
+  // === CHARM-AWARE STRIKE RECOMMENDATION ===
+  // Per rules.json: strike must be within expected move distance, not beyond it.
+  // If strike is further OTM than the chart's target, premium loses even when thesis is right.
+  let strikeRecommendation = null;
+  if (price > 0 && levels) {
+    const targetPrice = levels.t1?.price || levels.t2?.price;
+    if (targetPrice) {
+      // Round to nearest standard strike interval
+      const interval = price < 50 ? 0.5 : price < 200 ? 1 : price < 500 ? 2.5 : 5;
+      const roundToStrike = (p) => Math.round(p / interval) * interval;
+
+      let recommendedStrike, otmStrike, deepItmStrike, label;
+      if (direction === "CALLS") {
+        // For CALLS: ATM is best, slightly ITM acceptable, OTM only if reachable
+        recommendedStrike = roundToStrike(price); // ATM
+        otmStrike = roundToStrike(targetPrice); // At target = max acceptable OTM
+        deepItmStrike = roundToStrike(price - interval * 2);
+        label = "calls";
+      } else if (direction === "PUTS") {
+        recommendedStrike = roundToStrike(price); // ATM
+        otmStrike = roundToStrike(targetPrice); // At target = max acceptable OTM
+        deepItmStrike = roundToStrike(price + interval * 2);
+        label = "puts";
+      }
+
+      // Build charm-aware strike table
+      strikeRecommendation = {
+        primary_recommendation: `ATM $${recommendedStrike}${label === "calls" ? "C" : "P"}`,
+        secondary_recommendation: `Slight OTM $${otmStrike}${label === "calls" ? "C" : "P"} (at target level)`,
+        deeper_itm_alternative: `ITM $${deepItmStrike}${label === "calls" ? "C" : "P"} (more capital, less charm)`,
+        max_safe_otm_strike: `$${otmStrike}`,
+        rule: "Strike must be at-or-within target. Going further OTM than target = charm-trapped."
+      };
+    }
+  }
+
   // Build the card
   return {
     symbol,
     direction,
     suggested_dte: suggestedDte,
     price,
+    strike_recommendation: strikeRecommendation,
+    pinning_warning: pinningWarning,
+    trend_alignment: trendAlignment,
     // === NEW: Spatial analysis — where to enter, target, stop ===
     levels: levels ? {
       no_ceiling: levels.no_ceiling,
