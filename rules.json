@@ -349,6 +349,24 @@
       "warning": "High gamma amplifies losses too — only use on confirmed setups, not anticipation",
       "avoid": "Never hold high gamma into chop or lunch hours (11:30 AM - 1:00 PM)"
     },
+    "charm": {
+      "definition": "Charm = dDelta/dTime. Rate at which delta erodes per day from time passage alone (not from spot moves). Aka 'delta decay'.",
+      "regime_table": {
+        "OTM": "Charm is NEGATIVE for the option holder — delta drifts toward 0 each day. The further OTM, the harsher. Premium AND profit potential bleed simultaneously.",
+        "ATM": "Charm is minimal — delta stays near ±0.50 until last hours of expiry.",
+        "ITM": "Charm is POSITIVE for the option holder — delta drifts toward ±1.0, option becomes more stock-like as expiry approaches."
+      },
+      "core_rule": "Strike must be within expected move distance, not beyond it. If target is X% away on Y DTE, strike should be ≤ X% OTM, ideally ATM.",
+      "charm_aware_strike_selection": {
+        "0DTE": "ATM ONLY (delta 0.45-0.55). Charm is brutal on OTM intraday — gamma > charm only at ATM.",
+        "1DTE": "ATM or 1 strike OTM max. OTM gets charmed before it can move.",
+        "2DTE_3DTE": "Slight OTM acceptable IF target reachable in 1-2 days.",
+        "5DTE_7DTE": "Slight OTM OK only if structural target is real and price can reach it in ≤50% of DTE.",
+        "10DTE_plus": "Far OTM acceptable — charm impact small per day."
+      },
+      "charm_trap_warning": "If strike is further OTM than the chart's target level, you are charm-trapped. Even if thesis is right and target hits, you stay OTM and lose money. Example: NVDA spot $200, target $197 (Weak Low), strike $195P = wrong. At target, $195P is still $2 OTM. Need NVDA below $193 to make money. That's beyond the actual signal.",
+      "rule_for_edge_picks": "Edge play cards must flag CHARM_TRAP when (strike OTM distance) > (target distance from spot). Force user to choose strike at-or-better than target."
+    },
     "skew": {
       "put_skew": "Put IV much higher than call IV = fear premium, favor puts",
       "call_skew": "Call IV higher = unusual bullish demand, possible squeeze setup",
