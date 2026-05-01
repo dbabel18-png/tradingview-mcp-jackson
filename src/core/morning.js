@@ -859,7 +859,19 @@ function scoreSetup(signals, regime, quote) {
     }
   }
 
-  const qualified = score >= 3 && hasRequiredSignal && conviction >= 3 && direction !== null;
+  // Adaptive threshold: if chart is missing indicators, lower the bar.
+  // Count signal categories that COULD fire (indicators detected on chart)
+  // vs categories that DID fire. Require 60% hit rate of available signals.
+  const available = (signals.breakout_channel.found ? 1 : 0) +
+                    (signals.structure_shift.found ? 1 : 0) +
+                    (signals.liquidity_sweep.found ? 1 : 0) +
+                    (signals.order_blocks.found ? 1 : 0) +
+                    (signals.fvg.found ? 1 : 0) +
+                    (signals.bsl_ssl.found ? 1 : 0);
+
+  // Standard threshold: 3 signals from 6 categories. If chart is sparse, use 2.
+  const minScore = available >= 4 ? 3 : 2;
+  const qualified = score >= minScore && hasRequiredSignal && conviction >= minScore && direction !== null;
 
   return {
     score,
@@ -868,6 +880,8 @@ function scoreSetup(signals, regime, quote) {
     qualified,
     signals_hit: hit,
     signals_missed: missed,
+    available_indicators: available,
+    min_score_required: minScore,
     anti_patterns: antiPatterns.length ? antiPatterns : null,
     has_required_signal: hasRequiredSignal,
   };
