@@ -829,6 +829,30 @@ function scoreSetup(signals, regime, quote) {
     antiPatterns.push(`CONFIRMED: Weak Low at $${nearestWeakLow.toFixed(2)} — market expects it to get swept, bearish target`);
   }
 
+  // PROMOTION: Strong Low bounce setup → flip direction to CALLS
+  // If price is testing a Strong Low (within 1.5%) and there's no current direction,
+  // OR direction was bearish but bullish bounce structure exists, promote to CALLS.
+  if (nearestStrongLow && price > 0) {
+    const proxPct = ((price - nearestStrongLow) / price) * 100;
+    const testingStrongLow = proxPct >= 0 && proxPct <= 1.5;
+
+    if (testingStrongLow && !direction && !antiPatterns.some(ap => ap.startsWith("BLOCKED"))) {
+      // No direction yet — Strong Low test is a bullish setup
+      direction = "CALLS";
+      antiPatterns.push(`PROMOTED: Price testing Strong Low at $${nearestStrongLow.toFixed(2)} (${proxPct.toFixed(2)}% above) — bounce setup, CALLS bias`);
+    }
+  }
+  // PROMOTION: Strong High rejection setup → flip direction to PUTS
+  if (nearestStrongHigh && price > 0) {
+    const proxPct = ((nearestStrongHigh - price) / price) * 100;
+    const testingStrongHigh = proxPct >= 0 && proxPct <= 1.5;
+
+    if (testingStrongHigh && !direction && !antiPatterns.some(ap => ap.startsWith("BLOCKED"))) {
+      direction = "PUTS";
+      antiPatterns.push(`PROMOTED: Price testing Strong High at $${nearestStrongHigh.toFixed(2)} (${proxPct.toFixed(2)}% below) — rejection setup, PUTS bias`);
+    }
+  }
+
   // Determine if required signals are met
   const hasRequiredSignal = signals.structure_shift.found || signals.liquidity_sweep.found;
 
