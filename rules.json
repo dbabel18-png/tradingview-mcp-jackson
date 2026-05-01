@@ -455,6 +455,41 @@
     ]
   },
 
+  "exit_rules": {
+    "description": "Exits use the same multi-timeframe protocol as entries — symmetric. 1m alone is a warning, not a trigger. Confirm with 5m and 15m before exiting (unless hard override hits).",
+    "warning_signals_1m": [
+      "1m CHoCH against your trade direction — start watching closely, do NOT exit",
+      "Strong High/Low label flips to Weak (or vice versa) — re-evaluate but do NOT exit",
+      "Price loses 1m OB you entered from — tighten stop, do NOT exit",
+      "1m breakout channel direction flips — tighten stop, do NOT exit"
+    ],
+    "trim_signals_5m": [
+      "5m CHoCH confirms 1m flip → exit 50% of position, move stop to breakeven on rest",
+      "5m breakout channel flips against trade → exit 50%",
+      "Price loses 5m VWAP after entering near it → exit 50%",
+      "Liquidity sweep against your direction completes on 5m → exit 50%"
+    ],
+    "full_exit_signals_15m": [
+      "15m structure shifts against trade (CHoCH/BOS) → exit ALL remaining",
+      "15m breakout channel flips → exit ALL remaining",
+      "All 3 timeframes (1m + 5m + 15m) now disagree with original trade → exit ALL at market",
+      "Price loses 15m support (for longs) or resistance (for shorts) → exit ALL"
+    ],
+    "hard_overrides": [
+      "Premium stop hit (35-50% loss per DTE rules) — exit immediately, ignore timeframes",
+      "Strong/Weak label flips on 1m AGAINST your position (Strong High while holding puts becomes Weak = exit puts)",
+      "Time stop: 3:30 PM for 0DTE, configured time for other DTEs",
+      "Breakout channel + price both flip on 5m simultaneously — bypass 15m check, exit immediately",
+      "VIX spikes above 25 during trade — close half regardless of structure"
+    ],
+    "trim_protocol": {
+      "first_target": "At T1 level (per edge play card), sell 1/3 to lock profits",
+      "second_target": "At T2 level, sell another 1/3, move stop to T1 on remainder",
+      "runner": "Final 1/3 runs to T3 or rides until any full_exit_signal fires",
+      "minimum_holding": "Always keep at least 1 contract until either T1 hits or a hard_override fires — gives you skin if it rips"
+    }
+  },
+
   "risk_rules": [
     "Daily bankroll: $10,000 — resets daily, do not carry P&L forward",
     "Max $3,000 premium per single trade (30% of daily bankroll)",
@@ -470,8 +505,17 @@
     "Check VIX — if VIX > 25, reduce size to $1,500 max and tighten stops",
     "Never buy naked options when IV rank > 50 — use spreads or skip",
     "Never fight max pain in the last 2 hours of expiration day",
-    "If 1m structure flips against your trade — exit immediately, don't wait for 5m to confirm",
-    "If breakout channel flips against your trade — exit immediately"
+    "Exit protocol — 1m flip alone is a WARNING, not a panic exit. Check 5m and 15m before pulling the trigger:",
+    "  Step 1: 1m structure flips against your trade → tighten mental stop, watch next 1-2 candles closely (do NOT exit yet)",
+    "  Step 2: 5m confirms (CHoCH against trade direction OR price loses 5m OB/VWAP) → exit half position, lock in gains",
+    "  Step 3: 15m confirms (structure shift OR price loses 15m support/resistance) → exit remaining position immediately",
+    "  Step 4: If 1m + 5m + 15m ALL flip against trade in the same session → exit ALL contracts at market regardless of P&L",
+    "Hard exit overrides — these bypass the multi-timeframe check and exit immediately:",
+    "  - Stop loss hit (35-50% premium loss per DTE rules)",
+    "  - Price breaks structural level (BOS, OB stop, sweep zone) on 5m or 15m",
+    "  - Breakout channel direction flips on 5m AND price confirms (channel + price both wrong = exit)",
+    "  - Time stop hit (3:30 PM for 0DTE, end of day for any DTE you're not holding overnight)",
+    "  - Strong/Weak label flips on 1m (Strong High becomes Weak High while you hold puts = exit)"
   ],
 
   "morning_brief_instructions": "Start with SPY and QQQ to establish broad market bias via Smart Money Breakout Channels (regime gate). Check VIX and overnight futures. Open TradingView Options page for SPY/SPX — note max pain strike, put/call ratio, IV rank, and skew (confluence only). Then for each candidate symbol: (1) verify required indicators are loaded, (2) identify Strong/Weak High/Low labels on 1m, (3) check breakout channel direction on 5m, (4) read CHoCH/BOS labels with textColor for direction, (5) check for liquidity sweep, (6) verify multi-timeframe agreement (1m + 5m + 15m), (7) check OB/FVG/BSL/SSL levels for targets. Only flag setups that pass ALL gates. Output ONE top_pick play card with: direction, strike (target delta), DTE selection per dte_rules, entry trigger, stop level, premium target. Zero plays is always a valid answer.",
