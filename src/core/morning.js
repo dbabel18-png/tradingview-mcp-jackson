@@ -1241,6 +1241,83 @@ export async function runEdge({ rules_path, symbols, skip_regime, skip_options, 
     }
   }
 
+  // --- STEP 2c: MULTI-TIMEFRAME AGREEMENT GATE ---
+  // Require 1m + 5m + 15m to agree on direction before play qualifies.
+  // This is the final gate — if any timeframe disagrees, block the trade.
+  for (const setup of scoredSetups) {
+    const tradeDir = setup.scoring.direction;
+    if (!tradeDir) continue;
+
+    // 5m direction is what scoreSetup() set
+    const tf5m = tradeDir === "CALLS" ? "bullish" : "bearish";
+
+    // 1m direction (set during 1m scan if labels existed)
+    const tf1m = setup.tf_1m_structure || null;
+
+    // 15m direction (set during HTF scan)
+    const tf15m = setup.htf_structure?.direction || null;
+
+    setup.timeframe_alignment = {
+      "1m": tf1m,
+      "5m": tf5m,
+      "15m": tf15m,
+    };
+
+    // Count agreement
+    const agreements = [];
+    if (tf1m === tf5m) agreements.push("1m+5m");
+    if (tf15m === tf5m) agreements.push("5m+15m");
+    if (tf1m && tf15m && tf1m === tf15m) agreements.push("1m+15m");
+
+    const allAgree = tf1m === tf5m && tf5m === tf15m;
+    const hasDisagreement = (tf1m && tf1m !== tf5m) || (tf15m && tf15m !== tf5m);
+
+    if (!setup.scoring.anti_patterns) setup.scoring.anti_patterns = [];
+
+    if (allAgree) {
+      setup.scoring.anti_patterns.push(
+        `✓ ALIGNED: All 3 timeframes (1m + 5m + 15m) agree ${tf5m} — highest conviction`
+      );
+      setup.scoring.timeframe_aligned = true;
+    } else if (hasDisagreement) {
+      // Check how bad the disagreement is
+      if (tf1m && tf15m && tf1m !== tf5m && tf15m !== tf5m) {
+        // Both 1m AND 15m disagree with 5m — block entirely
+        setup.scoring.anti_patterns.push(
+          `BLOCKED: 1m=${tf1m}, 5m=${tf5m}, 15m=${tf15m} — multi-timeframe disagreement, no trade`
+        );
+        setup.scoring.direction = null;
+        setup.scoring.conviction = 0;
+        setup.scoring.qualified = false;
+      } else if (tf1m && tf1m !== tf5m) {
+        // Only 1m disagrees — short-term reversal forming, downgrade conviction
+        setup.scoring.anti_patterns.push(
+          `WARNING: 1m=${tf1m} vs 5m=${tf5m} — short-term timeframe disagrees, conviction reduced`
+        );
+        if (setup.scoring.conviction > 3) setup.scoring.conviction = 3;
+      } else if (tf15m && tf15m !== tf5m) {
+        // Only 15m disagrees — bigger picture against trade, downgrade
+        setup.scoring.anti_patterns.push(
+          `WARNING: 15m=${tf15m} vs 5m=${tf5m} — higher timeframe disagrees, conviction reduced`
+        );
+        if (setup.scoring.conviction > 3) setup.scoring.conviction = 3;
+      }
+    } else if (tf1m === tf5m && !tf15m) {
+      setup.scoring.anti_patterns.push(
+        `CONFIRMED: 1m + 5m agree ${tf5m} (15m no signal)`
+      );
+    } else if (tf15m === tf5m && !tf1m) {
+      setup.scoring.anti_patterns.push(
+        `CONFIRMED: 5m + 15m agree ${tf5m} (1m no signal)`
+      );
+    }
+  }
+
+  // Filter out plays that got blocked by MTF gate
+  const stillQualified = scoredSetups.filter(s => s.scoring.qualified !== false && s.scoring.direction);
+  scoredSetups.length = 0;
+  scoredSetups.push(...stillQualified);
+
   // --- STEP 3: OPTIONS CONFIRMATION on qualified setups ---
   const plays = [];
 
