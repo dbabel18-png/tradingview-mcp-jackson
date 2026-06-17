@@ -1,65 +1,567 @@
 {
-  "watchlist": ["BTCUSDT"],
-  "default_timeframe": "1",
+  "version": "1.2",
+  "last_updated": "2026-05-01",
+  "changelog": "v1.2: post-4/16 backtest update. Added Strong/Weak Low/High label rules, multi-timeframe agreement gate, adaptive scoring threshold, $10K daily bankroll reset, channel-CHoCH conflict resolution, required indicator stack, textColor direction codes.",
 
-  "strategy": {
-    "name": "10-Second Momentum Scalper",
-    "sources": [
-      "Price momentum — buy if last close > previous close (green candle)",
-      "RSI filter — only trade when RSI is not at an extreme (30–70 range)"
+  "trader_profile": {
+    "style": "Smart Money Concepts / Liquidity Pool Trading",
+    "instruments": "Options (calls/puts, 0DTE-4DTE)",
+    "bankroll": 10000,
+    "bankroll_resets_daily": true,
+    "risk_per_trade_max": 3000,
+    "risk_per_trade_pct": 0.30,
+    "timeframes": ["1", "5", "15", "30"],
+    "primary_timeframe": "5",
+    "confirmation_timeframe": "15",
+    "bias_timeframe": "30",
+    "intraday_structure_timeframe": "1"
+  },
+
+  "watchlist": [
+    "SPY", "QQQ", "MU", "MSFT"
+  ],
+  "default_timeframe": "5",
+  "prescreener": {
+    "gap_threshold": 1.5,
+    "max_extras": 3
+  },
+  "external_screeners": {
+    "enabled": true,
+    "yahoo_screens": [
+      "day_gainers",
+      "day_losers",
+      "most_actives",
+      "most_shorted_stocks",
+      "aggressive_small_caps"
     ],
-    "primary_timeframes": [
-      "1-minute (signal source)",
-      "10-second execution loop"
+    "max_per_screen": 15
+  },
+  "options_analysis": {
+    "auto_run_for_core_watchlist": true,
+    "max_expiries": 2,
+    "unusual_threshold": 2.0,
+    "unusual_min_volume": 500
+  },
+
+  "required_indicators": {
+    "description": "Edge scoring requires these 6 indicators loaded on the chart. Missing indicators reduce max possible score and trigger adaptive threshold lowering.",
+    "stack": [
+      {
+        "name": "Smart Money Concepts [LuxAlgo]",
+        "purpose": "BOS, CHoCH, EQH, EQL, Strong Low, Weak Low, Strong High, Weak High labels",
+        "critical": true,
+        "text_colors": {
+          "bullish": 4282726130,
+          "bearish": 4286683400
+        }
+      },
+      {
+        "name": "Smart Money Breakout Channels [AlgoAlpha]",
+        "purpose": "Direction filter — Bullish/Bearish Breakout Signal",
+        "critical": true
+      },
+      {
+        "name": "Liquidity Sweeps [LuxAlgo]",
+        "purpose": "Confirmed BSL/SSL sweep markers — required for any reversal/fade",
+        "critical": true
+      },
+      {
+        "name": "Order Block Detector [LuxAlgo]",
+        "purpose": "Order block zones (supply/demand)",
+        "critical": false,
+        "pair_with": "Sonarlab - Order Blocks"
+      },
+      {
+        "name": "Sonarlab - Order Blocks",
+        "purpose": "Confluence with LuxAlgo OB — when both agree, conviction is highest",
+        "critical": false
+      },
+      {
+        "name": "Institutional FVG & Liquidity Range Candle (Expo)",
+        "purpose": "FVG zones + exhaustion signals (New High/Low above/below Liquidity Range)",
+        "critical": false
+      },
+      {
+        "name": "FVG Order Blocks [BigBeluga]",
+        "purpose": "FVG confluence with OB",
+        "critical": false
+      },
+      {
+        "name": "Buyside & Sellside Liquidity [LuxAlgo]",
+        "purpose": "BSL/SSL level lines — target and trigger identification",
+        "critical": true
+      }
     ]
   },
 
-  "indicators": {
-    "rsi_14": "Momentum filter. Only trade when RSI is between 30–70 (avoid extremes).",
-    "price_momentum": "Compare last close vs previous close. Up = long signal. Down = short signal."
+  "edge_scoring": {
+    "description": "Asymmetric setup scanner. Chart indicators are the PRIMARY gate. Options flow is CONFIRMATION only. Never score a play that the chart doesn't confirm first.",
+
+    "regime_gate": {
+      "description": "Read SPY and QQQ Smart Money Breakout Channels FIRST. This gates which direction edge can score.",
+      "indicator": "Smart Money Breakout Channels [AlgoAlpha]",
+      "rules": [
+        "If SPY AND QQQ show Bullish Breakout Signal → regime = BULLISH → only score LONG plays unless a specific name has a CONFIRMED liquidity sweep + CHoCH reversal on 5m",
+        "If SPY AND QQQ show Bearish Breakout Signal → regime = BEARISH → only score SHORT plays unless a specific name has a CONFIRMED liquidity sweep + CHoCH reversal on 5m",
+        "If mixed or no signal → regime = NEUTRAL → score both sides but require extra confirmation",
+        "NEVER fade the regime without a confirmed sweep. Put flow in a bullish regime = hedging, not directional."
+      ]
+    },
+
+    "chart_signals": {
+      "description": "These are the PRIMARY signals. Read from TradingView indicators on 5m chart. 3+ required to qualify a play (or 2+ if fewer than 4 indicators are loaded — adaptive threshold).",
+      "signals": [
+        {
+          "name": "liquidity_sweep",
+          "indicator": "Liquidity Sweeps [LuxAlgo]",
+          "what": "Confirmed sweep of BSL (buy-side) or SSL (sell-side) liquidity",
+          "weight": "REQUIRED for any reversal/fade play. No sweep = no fade, period.",
+          "how_to_read": "Sweep marker appears on chart when price takes out a liquidity level and reverses. If absent, the move is continuation, not reversal."
+        },
+        {
+          "name": "structure_shift",
+          "indicator": "Smart Money Concepts [LuxAlgo]",
+          "what": "CHoCH (Change of Character) or BOS (Break of Structure) label on 5m",
+          "weight": "REQUIRED for direction confirmation. CHoCH = reversal signal. BOS = continuation signal.",
+          "how_to_read": "PlotCandle value = current SMC price. CHoCH label after a sweep = high conviction reversal. BOS without sweep = continuation, trade WITH it not against it. Direction determined from textColor (4282726130=bullish, 4286683400=bearish) when label text has no explicit direction."
+        },
+        {
+          "name": "liquidity_labels",
+          "indicator": "Smart Money Concepts [LuxAlgo] (1m chart)",
+          "what": "Strong Low / Weak Low / Strong High / Weak High labels visible on 1m timeframe only",
+          "weight": "CRITICAL FILTER. These define which liquidity is protected vs targetable.",
+          "how_to_read": [
+            "Strong Low = market says it holds (bullish floor) → BLOCKS puts that target it",
+            "Weak Low = market expects sweep (bearish magnet) → CONFIRMS puts targeting it",
+            "Strong High = market says it caps (bearish ceiling) → BLOCKS calls that target it",
+            "Weak High = market expects takeout (bullish magnet) → CONFIRMS calls targeting it",
+            "EQH/EQL = equal highs/lows, lesser conviction than Strong/Weak"
+          ]
+        },
+        {
+          "name": "order_block_level",
+          "indicator": "Sonarlab - Order Blocks + Order Block Detector [LuxAlgo]",
+          "what": "Price is AT or approaching a marked order block zone",
+          "weight": "Entry level validation. Prefer trades where entry aligns with an OB.",
+          "how_to_read": "Red zones = bearish OB (supply). Green/blue zones = bullish OB (demand). Check BOTH Sonarlab and LuxAlgo — when they agree on a level, conviction is highest."
+        },
+        {
+          "name": "fvg_confluence",
+          "indicator": "Institutional FVG & Liquidity Range Candle (Expo) + FVG Order Blocks [BigBeluga]",
+          "what": "Price is in or near a fair value gap",
+          "weight": "Confluence signal. FVG + OB at same level = highest conviction entry.",
+          "how_to_read": "New High above Liquidity Range > 0 = exhaustion signal (bullish move overextended). New Low below Liquidity Range > 0 = bearish exhaustion. Both at 0.00 = no exhaustion, trend is running."
+        },
+        {
+          "name": "breakout_channel",
+          "indicator": "Smart Money Breakout Channels [AlgoAlpha]",
+          "what": "Bullish or Bearish Breakout Signal on the individual name",
+          "weight": "Direction filter. Trade MUST agree with this signal unless a liquidity sweep contradicts it.",
+          "how_to_read": "Bullish Breakout Signal present = bullish bias. No signal or bearish = neutral/bearish. NEVER buy puts on a name showing Bullish Breakout unless sweep + CHoCH confirm reversal. PlotCandle value = current channel level for direction inference (price >0.15-0.5% above = bullish, below = bearish)."
+        },
+        {
+          "name": "bsl_ssl_levels",
+          "indicator": "Buyside & Sellside Liquidity [LuxAlgo]",
+          "what": "Marked BSL/SSL levels showing where liquidity pools sit",
+          "weight": "Target and trigger identification. BSL above = upside target for longs / sweep level for shorts.",
+          "how_to_read": "Price heading toward BSL = potential sweep setup. Price swept BSL and reversed = short trigger. Same logic inverted for SSL."
+        }
+      ]
+    },
+
+    "multi_timeframe_gate": {
+      "description": "After chart scoring, verify direction agreement across 1m, 5m, and 15m. This is the FINAL gate — added post 4/16 backtest after watching 5m PUTS get destroyed by 1m bullish reversals.",
+      "rules": [
+        "ALL 3 timeframes agree (1m + 5m + 15m same direction) → highest conviction",
+        "5m + 15m agree, 1m no signal → CONFIRMED, normal conviction",
+        "5m + 1m agree, 15m no signal → CONFIRMED, normal conviction",
+        "ONE timeframe disagrees → WARNING, conviction capped at 3 (3-star)",
+        "BOTH 1m and 15m disagree with 5m → BLOCKED, no trade",
+        "1m structure must be checked even if no labels — a fresh bullish CHoCH on 1m kills bearish 5m trade"
+      ]
+    },
+
+    "options_confirmation": {
+      "description": "Options flow is SECONDARY. Only check AFTER chart signals qualify. Used to size and time, not to determine direction.",
+      "signals": [
+        {
+          "name": "unusual_flow_directional",
+          "what": "Unusual vol/OI >2x on OTM strikes matching chart direction",
+          "filter": "MUST distinguish hedge vs directional: ITM puts on a rallying stock = hedge (ignore). OTM puts with delta -0.20 to -0.50 = potentially directional. Only count flow that AGREES with chart direction.",
+          "weight": "Confirmation + sizing signal"
+        },
+        {
+          "name": "skew_agreement",
+          "what": "25-delta skew agrees with chart direction",
+          "filter": "Positive skew (puts expensive) + chart says bearish = confirmed. Negative skew (calls expensive) + chart says bearish = DISAGREEMENT (options market doesn't confirm, reduce size).",
+          "weight": "Confirmation signal"
+        },
+        {
+          "name": "max_pain_gravity",
+          "what": "Price far from max pain with gravitational pull in trade direction",
+          "filter": "Only relevant on 0DTE and 1DTE in last 2 hours. On 2DTE+ max pain has weak pull — don't weight it heavily. PER USER FEEDBACK: max pain alone is NOT a trade signal — use only as confluence.",
+          "weight": "Timing signal for expiry-day plays only"
+        },
+        {
+          "name": "iv_check",
+          "what": "IV rank and absolute IV level",
+          "filter": "IV rank >50 = options expensive, flag for user. IV <30% = cheap options, good for naked. IV >80% = theta will eat you alive on wrong direction — REQUIRE spreads or reduce size to $1500.",
+          "weight": "Sizing signal — high IV = reduce size"
+        }
+      ]
+    },
+
+    "scoring": {
+      "minimum_to_qualify": 3,
+      "minimum_to_qualify_sparse_chart": 2,
+      "adaptive_threshold_rule": "If <4 of the 6 chart signal categories are detected (indicators not loaded), lower threshold to 2 signals. Otherwise require 3.",
+      "required_signals": ["At least ONE of: liquidity_sweep OR structure_shift (CHoCH/BOS) must be present from chart"],
+      "regime_override": "A name can ONLY score against the regime if it has BOTH liquidity_sweep AND structure_shift (CHoCH) confirming reversal. Unconfirmed fades = zero score regardless of options flow.",
+      "channel_choch_conflict": "If breakout channel direction disagrees with CHoCH direction: keep channel direction unless liquidity sweep ALSO confirms reversal. CHoCH alone is NOT enough to override channel.",
+      "conviction_scale": {
+        "5_star": "4+ chart signals + options confirmation + regime agreement + ALL timeframes aligned",
+        "4_star": "3 chart signals + options confirmation OR 4 chart signals + 2 timeframes aligned",
+        "3_star": "3 chart signals, no options confirmation, OR multi-timeframe partial disagreement — trade with reduced size",
+        "below_3": "Does not qualify. Return zero plays — never force a trade."
+      }
+    },
+
+    "anti_patterns": {
+      "description": "Patterns that caused wrong calls — explicitly filtered out at scoring time. Each pattern below produced real losses and is now a hard block.",
+      "rules": [
+        "BLOCKED: Puts target Strong Low (1m) with no Weak Low below — market says floor holds, no downside target",
+        "BLOCKED: Calls target Strong High (1m) with no Weak High above — market says ceiling holds, no upside target",
+        "BLOCKED: CHoCH direction disagrees with breakout channel AND no liquidity sweep — channel wins, CHoCH alone insufficient",
+        "BLOCKED: 1m and 15m both disagree with 5m direction — multi-timeframe disagreement = no trade",
+        "BLOCKED: Puts in bullish regime without confirmed sweep + CHoCH reversal",
+        "BLOCKED: Calls in bearish regime without confirmed sweep + CHoCH reversal",
+        "NEVER call puts based solely on unusual put volume in a bullish regime — that is hedging, not directional flow",
+        "NEVER call puts because price is 'far from max pain' when DTE >1 — max pain gravity is weak outside expiry day",
+        "NEVER call puts because P/C ratio is low (call-heavy) in a bullish breakout — low P/C IS the trend, not a contrarian signal",
+        "NEVER score a fade play without a confirmed liquidity sweep on the chart — 'price is extended' is not a signal",
+        "NEVER fight the Smart Money Breakout Channel direction without sweep + CHoCH confirmation",
+        "NEVER chase entries on extended RSI (>75 or <25) without pullback to OB or VWAP",
+        "If ALL of SPY, QQQ, and the individual name show Bullish Breakout Signal and NO liquidity sweep is detected, the ONLY valid play is a continuation long or no trade. Puts are forbidden."
+      ]
+    }
+  },
+  "midday_screener": {
+    "move_threshold": 2.0,
+    "volume_multiplier": 2.0,
+    "max_scan": 5
+  },
+  "watchlist_full": [
+    "SPY", "QQQ", "QQQI", "TQQQ", "SQQQ",
+    "SPX", "ES1!", "MES1!", "NQ1!", "MNQ1!", "VX1!",
+    "AAPL", "AMZN", "GOOGL", "MSFT", "TSLA", "PLTR",
+    "AMD", "MU", "SMCI", "RIVN", "LCID", "RBLX",
+    "IBIT", "ETHA", "ETHE", "BTCUSD", "ETHUSD",
+    "MSTR", "CORZ", "BTBT", "HOOD", "GLXY", "COIN",
+    "IONQ", "QBTS", "QUBT", "RGTI", "BBAI", "NVDX", "LUNR",
+    "TTD", "AI", "WOLF", "CRML",
+    "UUUU", "MP", "LAC",
+    "BIDU", "INTC",
+    "XOM", "OXY", "XOP", "XLE", "OIH", "BP", "SHEL", "PBR",
+    "DAL", "UAL", "AAL",
+    "UNH", "ABBV", "HUM", "SRPT", "HOLX",
+    "IWM", "EWZ", "NIFTY",
+    "VIX", "UVIX", "UVXY", "VIXY", "VXX",
+    "USAU", "BTI", "MSOS", "SBET",
+    "SMCL", "ABVE", "ABVX", "ASST", "SPCE", "OSCR", "IVZ",
+    "HIMS", "GDS", "OPEN", "FIG", "NAK", "USAR",
+    "TECS", "TSLR", "TMQ", "ETHU", "ETH",
+    "MIGI", "PRMB", "AESI", "FCUV", "KPRX", "XSPI",
+    "SLNO", "IDYA", "CIA", "BBAI"
+  ],
+
+  "smart_money_concepts": {
+    "liquidity_pools": {
+      "buy_side_liquidity": [
+        "Equal highs (EQH) — resting buy stops above prior swing highs",
+        "Previous day high (PDH)",
+        "Previous week high (PWH)",
+        "Round numbers / psychological levels",
+        "Top of consolidation range",
+        "Unfilled gaps to the upside",
+        "Weak High labels (1m) — market expects takeout"
+      ],
+      "sell_side_liquidity": [
+        "Equal lows (EQL) — resting sell stops below prior swing lows",
+        "Previous day low (PDL)",
+        "Previous week low (PWL)",
+        "Round numbers / psychological levels",
+        "Bottom of consolidation range",
+        "Unfilled gaps to the downside",
+        "Weak Low labels (1m) — market expects sweep"
+      ],
+      "protected_liquidity": {
+        "strong_low": "Bullish floor — market protects this level. Puts targeting Strong Low = no downside target = SKIP.",
+        "strong_high": "Bearish ceiling — market protects this level. Calls targeting Strong High = no upside target = SKIP."
+      },
+      "bias_rule": "Price always seeks liquidity. Weak labels are magnets, Strong labels are walls. Always trade toward Weak, never against Strong without sweep + CHoCH override."
+    },
+    "order_blocks": {
+      "bullish_ob": "Last bearish candle before a strong bullish move — expect price to return and bounce",
+      "bearish_ob": "Last bullish candle before a strong bearish move — expect price to return and reject",
+      "rule": "Only trade order blocks in the direction of the higher timeframe bias (15m or 30m)"
+    },
+    "fair_value_gaps": {
+      "bullish_fvg": "3-candle pattern where candle 1 high does not overlap candle 3 low — gap to the upside",
+      "bearish_fvg": "3-candle pattern where candle 1 low does not overlap candle 3 high — gap to the downside",
+      "rule": "FVGs act as magnets — price often returns to fill them before continuing"
+    },
+    "market_structure": {
+      "bullish": "Higher highs and higher lows on the primary timeframe",
+      "bearish": "Lower highs and lower lows on the primary timeframe",
+      "break_of_structure": "BOS confirms trend continuation",
+      "change_of_character": "CHoCH signals potential reversal — look for liquidity sweep followed by opposite BOS",
+      "textcolor_codes": {
+        "bullish": 4282726130,
+        "bearish": 4286683400,
+        "note": "LuxAlgo SMC labels use these textColor values. Use them when label text has no explicit direction (e.g. just 'CHoCH')."
+      }
+    }
+  },
+
+  "tradingview_options_page": {
+    "instructions": "Use TradingView's built-in Options page to pull live data before executing any trade",
+    "what_to_check": [
+      "Max pain strike for current expiry — note if price is above or below it (use as confluence only, NOT primary signal)",
+      "Open interest by strike — heaviest OI strikes act as magnets and walls",
+      "IV rank and IV percentile — above 50 means expensive premium, favor spreads",
+      "Put/call ratio — above 1.0 is bearish sentiment, below 0.7 is bullish",
+      "Skew — compare IV of equidistant calls vs puts to gauge market fear direction",
+      "Delta and gamma for your target strike before entering",
+      "Unusual volume spikes on specific strikes — smart money footprint"
+    ],
+    "workflow": "Chart SMC analysis → Multi-timeframe verify → TradingView Options page → Greeks confirm → Enter"
+  },
+
+  "options_greeks": {
+    "delta": {
+      "rule": "Prefer delta 0.40-0.55 (ATM) for directional plays",
+      "high_delta": "0.70+ = deep ITM, moves like stock — use for high conviction slow movers",
+      "low_delta": "Below 0.20 = avoid unless extreme momentum conviction",
+      "bias": "Calls: target delta 0.40-0.55. Puts: target delta -0.40 to -0.55"
+    },
+    "gamma": {
+      "rule": "High gamma = option accelerates near expiry — ideal for 0DTE confirmed sweeps",
+      "warning": "High gamma amplifies losses too — only use on confirmed setups, not anticipation",
+      "avoid": "Never hold high gamma into chop or lunch hours (11:30 AM - 1:00 PM)"
+    },
+    "charm": {
+      "definition": "Charm = dDelta/dTime. Rate at which delta erodes per day from time passage alone (not from spot moves). Aka 'delta decay'.",
+      "regime_table": {
+        "OTM": "Charm is NEGATIVE for the option holder — delta drifts toward 0 each day. The further OTM, the harsher. Premium AND profit potential bleed simultaneously.",
+        "ATM": "Charm is minimal — delta stays near ±0.50 until last hours of expiry.",
+        "ITM": "Charm is POSITIVE for the option holder — delta drifts toward ±1.0, option becomes more stock-like as expiry approaches."
+      },
+      "core_rule": "Strike must be within expected move distance, not beyond it. If target is X% away on Y DTE, strike should be ≤ X% OTM, ideally ATM.",
+      "charm_aware_strike_selection": {
+        "0DTE": "ATM ONLY (delta 0.45-0.55). Charm is brutal on OTM intraday — gamma > charm only at ATM.",
+        "1DTE": "ATM or 1 strike OTM max. OTM gets charmed before it can move.",
+        "2DTE_3DTE": "Slight OTM acceptable IF target reachable in 1-2 days.",
+        "5DTE_7DTE": "Slight OTM OK only if structural target is real and price can reach it in ≤50% of DTE.",
+        "10DTE_plus": "Far OTM acceptable — charm impact small per day."
+      },
+      "charm_trap_warning": "If strike is further OTM than the chart's target level, you are charm-trapped. Even if thesis is right and target hits, you stay OTM and lose money. Example: NVDA spot $200, target $197 (Weak Low), strike $195P = wrong. At target, $195P is still $2 OTM. Need NVDA below $193 to make money. That's beyond the actual signal.",
+      "rule_for_edge_picks": "Edge play cards must flag CHARM_TRAP when (strike OTM distance) > (target distance from spot). Force user to choose strike at-or-better than target."
+    },
+    "skew": {
+      "put_skew": "Put IV much higher than call IV = fear premium, favor puts",
+      "call_skew": "Call IV higher = unusual bullish demand, possible squeeze setup",
+      "iv_rank": "IV rank above 50 = buy spreads not naked options"
+    },
+    "max_pain": {
+      "definition": "Strike where most options expire worthless — MMs incentivized to pin price here near expiry",
+      "rule": "Confluence only — DO NOT use as primary signal (per user feedback). Useful only in last 2 hours of expiry day.",
+      "use_cases": [
+        "Confluence with chart bias — strengthens conviction, never originates trade",
+        "Strongest in last 1-2 hours on expiration day",
+        "Max pain + liquidity pool + order block = highest conviction entry",
+        "Never trade against max pain in last 2 hours of expiry day"
+      ]
+    },
+    "zero_dte_pinning": {
+      "definition": "0DTE max pain creates a short-term gravitational force that pulls spot price toward the pin strike in the last 1-2 hours of the trading day. This effect impacts ALL longer-dated positions on the same underlying — they get whipsawed by the pin.",
+      "why_it_matters": "If you hold a 5/8 put and 0DTE max pain is ABOVE current spot, the underlying will drift UP into close, blowing through your stop or eroding your option value. Even though your position has 5+ days left, the 0DTE pin moves spot today.",
+      "rules": [
+        "ALWAYS check today's 0DTE max pain even when holding longer-dated positions",
+        "If 0DTE max pain is in the OPPOSITE direction of your trade thesis: tighten stops or trim before 2 PM",
+        "After 2 PM, 0DTE pinning gravity is strongest — assume price drifts toward pin into close",
+        "If 0DTE max pain agrees with your direction: hold into close, pin helps",
+        "If 0DTE max pain disagrees: exit half before 2 PM, hold runner only if structure still confirms"
+      ],
+      "calculation": "Pull options_analysis on underlying, get expiries[0].max_pain.maxPain. Compare to spot. Distance + time-of-day determines pin pressure.",
+      "example": "User holds 6x NVDA 5/8 $195P. Spot $200. NVDA 0DTE (5/1) max pain = $197.50. PIN AGREES with bearish thesis — hold. If 0DTE max pain were $202.50, the pin would drag spot UP today, hurting the longer-dated puts. Action: exit half before 2 PM."
+    },
+    "market_trend_alignment": {
+      "definition": "Macro regime check — even if individual ticker setup is clean, fighting the broader market regime requires sweep + CHoCH override.",
+      "rules": [
+        "BEFORE entering ANY directional trade, check SPY and QQQ via regime gate",
+        "If regime is BULLISH (SPY+QQQ both bullish breakout) and you take PUTS: REQUIRE both liquidity_sweep AND CHoCH on the individual name — both confirmed",
+        "If regime is BEARISH and you take CALLS: same requirement",
+        "If regime is NEUTRAL: setup must be ★★★ or higher to qualify",
+        "If individual ticker setup says PUTS but ALL of (SPY, QQQ, ticker) show bullish breakout signals AND no liquidity sweep on ticker: BLOCKED — this is the configured anti-pattern"
+      ],
+      "trade_against_trend_warning": "Going against the macro trend is statistically the lowest-win-rate play in our backtest. Even with confirmation, expect 30-40% win rate vs 55-65% for trend-aligned plays. Size DOWN by 50% when fighting trend.",
+      "the_5_1_2026_lesson": "User entered NVDA 5/8 $195P during a bullish day (SPY +0.6%, QQQ +0.9%, VIX 16.7 calm). 5m+1m showed bearish CHoCH but 15m had no signal and macro was risk-on. The trade was against trend. System should have flagged this as a TREND_FIGHT setup and capped conviction at 2."
+    }
+  },
+
+  "dte_rules": {
+    "0DTE": {
+      "best_for": "High conviction liquidity sweeps with immediate CHoCH — move happens same day",
+      "entry_window": "9:45 AM - 2:00 PM only",
+      "strike": "ATM, delta 0.45-0.55",
+      "size_max": 2000,
+      "size_note": "Max $2K on $10K bankroll (20%) — 0DTE risk is highest",
+      "stop": "35-40% premium loss",
+      "target": "80-150% gain on premium",
+      "avoid": "Do not hold through lunch chop. Do not buy after 2 PM."
+    },
+    "1DTE": {
+      "best_for": "Strong trend days or overnight confirmation setups",
+      "strike": "ATM to 1 OTM, delta 0.40-0.55",
+      "size_max": 2500,
+      "stop": "40-45% premium loss",
+      "target": "100% gain on premium"
+    },
+    "2DTE": {
+      "best_for": "Swing setups where price needs time to reach liquidity target — preferred DTE",
+      "strike": "1 OTM, delta 0.35-0.50",
+      "size_max": 3000,
+      "stop": "45% premium loss",
+      "target": "100-200% gain on premium"
+    },
+    "3DTE_4DTE": {
+      "best_for": "Swing trades targeting major liquidity pools 1-2 days out, or elevated IV environments",
+      "strike": "ATM or 1 OTM, delta 0.40-0.55",
+      "size_max": 3000,
+      "stop": "45-50% premium loss",
+      "target": "100-200% on premium",
+      "note": "Check max pain for that expiry — avoid buying if your strike IS the max pain level"
+    },
+    "dte_selection_rule": "Match DTE to distance price needs to travel. Closer target = shorter DTE. Always check TradingView Options page OI and max pain before buying any strike. All sizes capped by $3K/30% bankroll rule regardless of DTE."
   },
 
   "bias_criteria": {
     "bullish": [
-      "Last 1-min candle closed higher than the one before it",
-      "RSI is between 30 and 70"
+      "Price swept sell-side liquidity (equal lows, PDL, or Weak Low) and reversed with momentum",
+      "Bullish CHoCH on 5m or 15m after liquidity sweep",
+      "Price trading above PDH or reclaiming key level",
+      "Higher timeframe (30m) structure is bullish",
+      "Price returning into bullish order block or FVG",
+      "SPY/QQQ leading bullish — broad market tailwind",
+      "Put/call ratio below 0.7 or declining",
+      "Weak High above price (1m) — bullish magnet",
+      "Strong Low below price holds (1m)"
     ],
     "bearish": [
-      "Last 1-min candle closed lower than the one before it",
-      "RSI is between 30 and 70"
+      "Price swept buy-side liquidity (equal highs, PDH, or Weak High) and rejected with momentum",
+      "Bearish CHoCH on 5m or 15m after liquidity sweep",
+      "Price trading below PDL or rejecting key level",
+      "Higher timeframe (30m) structure is bearish",
+      "Price returning into bearish order block or FVG",
+      "SPY/QQQ leading bearish — broad market headwind",
+      "Put/call ratio above 1.0 or rising",
+      "Weak Low below price (1m) — bearish magnet",
+      "Strong High above price holds (1m)"
     ],
     "neutral": [
-      "RSI is above 70 (overbought — skip)",
-      "RSI is below 30 (oversold — skip)",
-      "Candle close change is less than 0.05% (chop — skip)"
+      "Price inside previous day range with no clear liquidity sweep",
+      "Choppy structure with no clean BOS",
+      "Conflicting signals between 5m and 15m",
+      "Price sitting exactly at max pain — expect pinning, avoid directional plays",
+      "Multi-timeframe disagreement (1m vs 5m vs 15m)"
     ]
   },
 
   "entry_rules": {
-    "long": [
-      "Last close > previous close by at least 0.05%",
-      "RSI between 30 and 70",
-      "Enter market buy immediately"
+    "long_entry": [
+      "1. Identify sell-side liquidity swept (equal lows, PDL, Weak Low)",
+      "2. Wait for sweep rejection (wick or engulfing candle)",
+      "3. Look for bullish CHoCH on 1m or 5m",
+      "4. Verify 1m + 5m + 15m direction agreement (multi-timeframe gate)",
+      "5. Verify no Strong High caps upside on 1m",
+      "6. Check TradingView Options page — confirm no heavy call OI wall overhead",
+      "7. Enter on retest of CHoCH level or bullish OB, delta 0.40-0.55, choose DTE per dte_rules"
     ],
-    "short": [
-      "Last close < previous close by at least 0.05%",
-      "RSI between 30 and 70",
-      "Enter market sell immediately"
+    "short_entry": [
+      "1. Identify buy-side liquidity swept (equal highs, PDH, Weak High)",
+      "2. Wait for sweep rejection (wick or engulfing candle)",
+      "3. Look for bearish CHoCH on 1m or 5m",
+      "4. Verify 1m + 5m + 15m direction agreement (multi-timeframe gate)",
+      "5. Verify no Strong Low protects downside on 1m",
+      "6. Check TradingView Options page — confirm no heavy put OI wall below",
+      "7. Enter on retest of CHoCH level or bearish OB, delta -0.40 to -0.55, choose DTE per dte_rules"
     ]
   },
 
-  "exit_rules": [
-    "Exit automatically after 10 seconds (next loop tick closes previous position)",
-    "No manual exit management — pure time-based scalp"
-  ],
+  "exit_rules": {
+    "description": "Exits use the same multi-timeframe protocol as entries — symmetric. 1m alone is a warning, not a trigger. Confirm with 5m and 15m before exiting (unless hard override hits).",
+    "warning_signals_1m": [
+      "1m CHoCH against your trade direction — start watching closely, do NOT exit",
+      "Strong High/Low label flips to Weak (or vice versa) — re-evaluate but do NOT exit",
+      "Price loses 1m OB you entered from — tighten stop, do NOT exit",
+      "1m breakout channel direction flips — tighten stop, do NOT exit"
+    ],
+    "trim_signals_5m": [
+      "5m CHoCH confirms 1m flip → exit 50% of position, move stop to breakeven on rest",
+      "5m breakout channel flips against trade → exit 50%",
+      "Price loses 5m VWAP after entering near it → exit 50%",
+      "Liquidity sweep against your direction completes on 5m → exit 50%"
+    ],
+    "full_exit_signals_15m": [
+      "15m structure shifts against trade (CHoCH/BOS) → exit ALL remaining",
+      "15m breakout channel flips → exit ALL remaining",
+      "All 3 timeframes (1m + 5m + 15m) now disagree with original trade → exit ALL at market",
+      "Price loses 15m support (for longs) or resistance (for shorts) → exit ALL"
+    ],
+    "hard_overrides": [
+      "Premium stop hit (35-50% loss per DTE rules) — exit immediately, ignore timeframes",
+      "Strong/Weak label flips on 1m AGAINST your position (Strong High while holding puts becomes Weak = exit puts)",
+      "Time stop: 3:30 PM for 0DTE, configured time for other DTEs",
+      "Breakout channel + price both flip on 5m simultaneously — bypass 15m check, exit immediately",
+      "VIX spikes above 25 during trade — close half regardless of structure"
+    ],
+    "trim_protocol": {
+      "first_target": "At T1 level (per edge play card), sell 1/3 to lock profits",
+      "second_target": "At T2 level, sell another 1/3, move stop to T1 on remainder",
+      "runner": "Final 1/3 runs to T3 or rides until any full_exit_signal fires",
+      "minimum_holding": "Always keep at least 1 contract until either T1 hits or a hard_override fires — gives you skin if it rips"
+    }
+  },
 
   "risk_rules": [
-    "Fixed trade size: 1% of portfolio per trade",
-    "Maximum trade size: $3.00",
-    "Maximum 6 trades per 60-second run",
-    "No stop loss — exit is time-based at next tick",
-    "For demo purposes only — minimum BitGet order size may apply"
+    "Daily bankroll: $10,000 — resets daily, do not carry P&L forward",
+    "Max $3,000 premium per single trade (30% of daily bankroll)",
+    "Max 2 open positions at same time",
+    "Stop trading after 2 consecutive losses in a day",
+    "No revenge trading — if stopped out, wait for next clean setup",
+    "Check SPY/QQQ bias before trading any individual name",
+    "Avoid earnings plays unless specifically prepared",
+    "No trading in first 15 minutes (9:30-9:45 AM)",
+    "No new entries 11:30 AM - 1:00 PM (lunch chop)",
+    "No new 0DTE entries after 2:00 PM",
+    "Hard time stop: close all 0DTE positions by 3:30 PM",
+    "Check VIX — if VIX > 25, reduce size to $1,500 max and tighten stops",
+    "Never buy naked options when IV rank > 50 — use spreads or skip",
+    "Never fight max pain in the last 2 hours of expiration day",
+    "Exit protocol — 1m flip alone is a WARNING, not a panic exit. Check 5m and 15m before pulling the trigger:",
+    "  Step 1: 1m structure flips against your trade → tighten mental stop, watch next 1-2 candles closely (do NOT exit yet)",
+    "  Step 2: 5m confirms (CHoCH against trade direction OR price loses 5m OB/VWAP) → exit half position, lock in gains",
+    "  Step 3: 15m confirms (structure shift OR price loses 15m support/resistance) → exit remaining position immediately",
+    "  Step 4: If 1m + 5m + 15m ALL flip against trade in the same session → exit ALL contracts at market regardless of P&L",
+    "Hard exit overrides — these bypass the multi-timeframe check and exit immediately:",
+    "  - Stop loss hit (35-50% premium loss per DTE rules)",
+    "  - Price breaks structural level (BOS, OB stop, sweep zone) on 5m or 15m",
+    "  - Breakout channel direction flips on 5m AND price confirms (channel + price both wrong = exit)",
+    "  - Time stop hit (3:30 PM for 0DTE, end of day for any DTE you're not holding overnight)",
+    "  - Strong/Weak label flips on 1m (Strong High becomes Weak High while you hold puts = exit)"
   ],
 
-  "notes": "Demo strategy for YouTube video. Runs 6 trades over 60 seconds, one every 10 seconds. Signal is simple price momentum on 1-min candles with RSI sanity check."
+  "morning_brief_instructions": "Start with SPY and QQQ to establish broad market bias via Smart Money Breakout Channels (regime gate). Check VIX and overnight futures. Open TradingView Options page for SPY/SPX — note max pain strike, put/call ratio, IV rank, and skew (confluence only). Then for each candidate symbol: (1) verify required indicators are loaded, (2) identify Strong/Weak High/Low labels on 1m, (3) check breakout channel direction on 5m, (4) read CHoCH/BOS labels with textColor for direction, (5) check for liquidity sweep, (6) verify multi-timeframe agreement (1m + 5m + 15m), (7) check OB/FVG/BSL/SSL levels for targets. Only flag setups that pass ALL gates. Output ONE top_pick play card with: direction, strike (target delta), DTE selection per dte_rules, entry trigger, stop level, premium target. Zero plays is always a valid answer.",
+
+  "session_notes": "v1.2 update: Added post-4/16 backtest learnings. Critical changes: (1) Strong/Weak Low/High labels are now hard blocks not warnings. (2) Multi-timeframe gate requires 1m + 5m + 15m alignment. (3) CHoCH alone CANNOT override breakout channel — needs sweep too. (4) Bankroll is $10K daily reset, max $3K per trade. (5) Adaptive scoring threshold lowers from 3 to 2 when chart has fewer than 4 indicators loaded. (6) textColor 4282726130=bullish, 4286683400=bearish for direction inference."
 }

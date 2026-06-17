@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { startHeartbeat } from "./connection.js";
 import { registerHealthTools } from "./tools/health.js";
 import { registerChartTools } from "./tools/chart.js";
 import { registerPineTools } from "./tools/pine.js";
@@ -15,6 +16,7 @@ import { registerUiTools } from "./tools/ui.js";
 import { registerPaneTools } from "./tools/pane.js";
 import { registerTabTools } from "./tools/tab.js";
 import { registerMorningTools } from "./tools/morning.js";
+import { registerOptionsTools } from "./tools/options.js";
 
 const server = new McpServer(
   {
@@ -53,6 +55,11 @@ Pine Script development:
 - pine_get_errors → read errors, pine_get_console → read log output
 - WARNING: pine_get_source can return 200KB+ for complex scripts — avoid unless editing
 
+EDGE SCORING (primary trading tool):
+- edge → chart-first asymmetric setup scanner. Reads ALL indicators, scores 6 signal categories, returns play cards
+- morning_brief → premarket brief: pre-screener + edge scoring on watchlist
+- midday_scan → intraday movers + edge scoring on top movers
+
 Screenshots: capture_screenshot → regions: "full", "chart", "strategy_tester"
 Replay: replay_start → replay_step → replay_trade → replay_status → replay_stop
 Batch: batch_run → run action across multiple symbols/timeframes
@@ -87,6 +94,7 @@ registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
 registerMorningTools(server);
+registerOptionsTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write(
@@ -95,6 +103,9 @@ process.stderr.write(
 process.stderr.write(
   "   Ensure your usage complies with TradingView's Terms of Use.\n\n",
 );
+
+// Start heartbeat to detect dead CDP connections early
+startHeartbeat();
 
 // Start stdio transport
 const transport = new StdioServerTransport();
